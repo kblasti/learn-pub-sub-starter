@@ -4,6 +4,7 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 	"fmt"
 	"log"
+	"strconv"
 
 	"github.com/kblasti/peril/internal/gamelogic"
 	"github.com/kblasti/peril/internal/pubsub"
@@ -97,7 +98,23 @@ func main() {
 		case "help":
 			gamelogic.PrintClientHelp()
 		case "spam":
-			fmt.Println("Spamming not allowed yet!")
+			if len(input) < 2 {
+				fmt.Println("Number of spams needed")
+				continue
+			}
+			n, err := strconv.Atoi(input[1])
+			if err != nil {
+				fmt.Println("Error converting input to int")
+				continue
+			}
+			for i := 0; i < n; i++ {
+				msg := gamelogic.GetMaliciousLog()
+				err = publishGameLog(channel, msg, username)
+				if err != nil {
+					fmt.Println("Error posting spam")
+					break
+				}
+			}
 		case "quit":
 			gamelogic.PrintQuit()
 			return

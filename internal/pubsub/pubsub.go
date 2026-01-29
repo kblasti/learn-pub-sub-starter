@@ -68,57 +68,6 @@ func DeclareAndBind(conn *amqp.Connection, exchange, queueName, key string, queu
 	return channel, queue, nil
 }
 
-func SubscribeJSON[T any](
-    conn *amqp.Connection,
-    exchange,
-    queueName,
-    key string,
-    queueType SimpleQueueType, // an enum to represent "durable" or "transient"
-    handler func(T) AckType,
-) error {
-	channel, queue, err := DeclareAndBind(conn, exchange, queueName, key, queueType)
-	if err != nil {
-		return err
-	}
-
-	deliveryChan, err := channel.Consume(queue.Name, "", false, false, false, false, nil)
-	if err != nil {
-		return err
-	}
-
-	go func() {
-		for d := range deliveryChan {
-			var msg T
-			err = json.Unmarshal(d.Body, &msg)
-			if err != nil {
-				fmt.Println(err)
-			}
-			acktype := handler(msg)
-			switch acktype {
-			case "ack":
-				err = d.Ack(false)
-				fmt.Println("message acknowledged")
-				if err != nil {
-					fmt.Println(err)
-				}
-			case "nackreque":
-				err = d.Nack(false, true)
-				fmt.Println("message not acknowledged, requeing")
-				if err != nil {
-					fmt.Println(err)
-				}
-			case "nackdiscard":
-				err = d.Nack(false, false)
-				fmt.Println("message not acknowledged, discarding")
-				if err != nil {
-					fmt.Println(err)
-				}
-			}
-		}
-	}()
-	return nil
-}
-
 func PublishGob[T any] (ch *amqp.Channel, exchange, key string, val T) error {
 	var buf bytes.Buffer
 	encoder := gob.NewEncoder(&buf)
@@ -141,4 +90,115 @@ func PublishGob[T any] (ch *amqp.Channel, exchange, key string, val T) error {
 	}
 
 	return nil
+}
+
+func subscribe[T any](
+	conn *amqp.Connection,
+	exchange,
+	queueName,
+	key string,
+	queueType SimpleQueueType,
+	handler func(T) AckType,
+	unmarshaller func([]byte) (T, error),
+) error {
+	channel, queue, err := DeclareAndBind(conn, exchange, queueName, key, queueType)
+	if err != nil {
+		return err
+	}
+
+	err = channel.Qos(10, 0, false)
+	if err != nil {
+		return err
+	}
+
+	deliveryChan, err := channel.Consume(queue.Name, "", false, false, false, false, nil)
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		for d := range deliveryChan {
+			var msg T
+			msg, err = unmarshaller(d.Body)
+			if err != nil {
+				fmt.Println(err)
+			}
+			acktype := handler(msg)
+			switch acktype {
+			case Ack:
+				err = d.Ack(false)
+				fmt.Println("message acknowledged")
+				if err != nil {
+					fmt.Println(err)
+				}
+			case NackReque:
+				err = d.Nack(false, true)
+				fmt.Println("message not acknowledged, requeing")
+				if err != nil {
+					fmt.Println(err)
+				}
+			case NackDiscard:
+				err = d.Nack(false, false)
+				fmt.Println("message not acknowledged, discarding")
+				if err != nil {
+					fmt.Println(err)
+				}
+			}
+		}
+	}()
+	return nil
+}
+
+func jsonUnmarshaller[T any](b []byte) (T, error) {
+    var v T
+    err := json.Unmarshal(b, &v)
+    return v, err
+}
+
+func gobUnmarshaller[T any](b []byte) (T, error) {
+	var v T
+	buf := bytes.NewBuffer(b)
+	decoder := gob.NewDecoder(buf)
+	err := decoder.Decode(&v)
+	return v, err
+}
+
+func SubscribeJSON[T any](
+    conn *amqp.Connection,
+    exchange,
+    queueName,
+    key string,
+    queueType SimpleQueueType,
+    handler func(T) AckType,
+) error {
+	err := subscribe(
+		conn,
+		exchange,
+		queueName,
+		key,
+		queueType,
+		handler,
+		jsonUnmarshaller[T],
+	)
+	return err
+}
+
+func SubscribeGob[T any](
+    conn *amqp.Connection,
+    exchange,
+    queueName,
+    key string,
+    queueType SimpleQueueType,
+    handler func(T) AckType,
+) error {
+	err := subscribe(
+		conn,
+		exchange,
+		queueName,
+		key,
+		queueType,
+		handler,
+		gobUnmarshaller[T],
+	)
+	return err
 }

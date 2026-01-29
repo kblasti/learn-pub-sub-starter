@@ -36,6 +36,18 @@ func main() {
 
 	fmt.Printf("Queue %v declared and bound!\n", queue.Name)
 
+	err = pubsub.SubscribeGob[routing.GameLog](
+		connection,
+		routing.ExchangePerilTopic,
+		routing.GameLogSlug,
+		routing.GameLogSlug + ".*",
+		pubsub.Durable,
+		handleGameLog,
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	fmt.Println("Starting Peril server...")
 	gamelogic.PrintServerHelp()
 

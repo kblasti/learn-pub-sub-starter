@@ -22,3 +22,4 @@ func publishGameLog(ch *amqp.Channel, message, username string) error {
 
 	return nil
 }
+
